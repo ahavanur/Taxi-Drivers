@@ -1,0 +1,216 @@
+---
+title: "Taxi Driver Analysis"
+output: html_document
+---
+
+My first task was to select the first two and the last two trips that each driver made during each day. To do this, I went through the dataset and for each day, I took the two trips that occured before and after the driver's biggest break, which I took to be the time they were off the clock and not working (to eat, sleep, work another job, etc.) The code below filters the entire dataset of the largest 10 drivers, to take these specific trips. 
+```{r}
+data = read.csv("largest.csv")
+
+find_dates = function(driver) {
+  dates = c()
+  for (date_time in driver$pickup_datetime) {
+    temp_date = unlist(strsplit(date_time, " ", fixed = TRUE))[1]
+    dates = c(dates, temp_date)
+  }
+  return (unique(dates))
+}
+
+find_times = function(date, driver) {
+  times = c()
+  for (date_time_2 in driver$pickup_datetime) {
+    if (grepl(date, date_time_2)) {
+      temp_time = unlist(strsplit(date_time_2, " ", fixed = TRUE))[2]
+      time_in_min = convert_time(temp_time)
+      times = c(times, time_in_min)
+    }
+  }
+  return (times)
+}
+
+last_two_first_two = function(minutes) {
+  max_rest = 0
+  for (i in 1:(length(minutes)-2)) {
+    curr_rest = minutes[i+1] - minutes[i]
+    max_rest = max(max_rest, curr_rest)
+  }
+  for (j in 1:(length(minutes)-2)) {
+    if (length(minutes) == 1) {
+      return (minutes[1])
+    }
+    if (minutes[j+1] - minutes[j] == max_rest) {
+      return(c(minutes[j-1], minutes[j], minutes[j+1], minutes[j+2]))
+    }
+  }
+  return(c(minutes[1], minutes[2], minutes[length(minutes)-1], minutes[length(minutes)]))
+}
+
+convert_time = function(time) {
+  hours = unlist(strsplit(time, ":", fixed = TRUE))[1]
+  minutes = unlist(strsplit(time, ":", fixed = TRUE))[2]
+  return (as.numeric(hours)*60+as.numeric(minutes))
+}
+
+unconvert = function(times_vector) {
+  analog_times = c()
+  for (minutes in times_vector) {
+    hours = as.character(floor(minutes/60))
+    leftover_minutes = as.character(minutes %% 60)
+    if (is.na(as.numeric(leftover_minutes))) {
+      print(minutes)
+      leftover_minutes = "00"
+    }
+    if (as.numeric(leftover_minutes) < 10) {
+      leftover_minutes = paste("0", leftover_minutes, sep = "")
+    }
+    analog_time = paste(hours, ":", leftover_minutes, sep = "")
+    analog_times = c(analog_times, analog_time)
+  }
+  return (analog_times)
+}
+main = function(data) {
+  result.frame = data.frame(matrix(ncol = length(data)))
+  colnames(result.frame) = colnames(data)
+  drivers = levels(data$hack_license)
+  for (name in drivers) {
+    driver = data[which(data$hack_license == name),]
+    dates = find_dates(driver)
+    for (date in dates) {
+      times = find_times(date, driver)
+      first_and_last = last_two_first_two(times)
+      first_and_last_analog = unconvert(first_and_last)
+      relevant_date_times = c()
+      for (time_of_day in first_and_last_analog) {
+        date_time_full = paste(date, time_of_day)
+        relevant_date_times = c(relevant_date_times, date_time_full)
+      }
+      for (date_and_time in relevant_date_times) {
+        values = as.vector(driver[which(driver$pickup_datetime == date_and_time),])
+        result.frame = rbind(result.frame, values)
+      }
+    }
+  }
+  return (result.frame[-1,])
+}
+taxi.trips = main(data)
+```
+
+Now that the relevant data has been selected however, more still needed to be before analyzing its contents. The first issue was that the dropoff and pickup latitude and longitutde coordinates were mislabelled or even missing, which would make analyzing them impossible. Next, I figured that it might be useful to remove some of the outliers from the fare and duration data as well.
+```{r}
+remove_outliers = function(x, na.rm = TRUE, ...) {
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = na.rm, ...)
+  H = 1.5 * IQR(x, na.rm = na.rm)
+  y = x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  return (y)
+}
+
+fix_coordinates = function(data) {
+  orig_pickup_long = data$pickup_longitude
+  orig_pickup_lat = data$pickup_latitude
+  orig_dropoff_long = data$dropoff_longitude
+  orig_dropoff_lat = data$dropoff_latitude
+  for (i in 1:nrow(data)) {
+    if (is.na(data$pickup_latitude[i])) {
+    }
+    if (data$pickup_latitude[i] < 0) {
+      data$pickup_latitude[i] = orig_pickup_long[i]
+      data$pickup_longitude[i] = orig_pickup_lat[i]
+      data$dropoff_latitude[i] = orig_dropoff_long[i]
+      data$dropoff_longitude[i] = orig_dropoff_lat[i]
+    }
+    if (data$pickup_latitude[i] == 0 | data$pickup_longitude[i] == 0 | data$dropoff_latitude[i] == 0 | data$dropoff_longitude[i] == 0) {
+      data$pickup_latitude[i] = NA
+      data$pickup_longitude[i] = NA
+      data$dropoff_latitude[i] = NA
+      data$dropoff_longitude[i] = NA
+    }
+  }
+  return (data)
+}
+taxi.trips.original = taxi.trips
+taxi.trips = fix_coordinates(taxi.trips)
+taxi.trips$fare_amount = remove_outliers(taxi.trips$fare_amount)
+taxi.trips$trip_time_in_secs = remove_outliers(taxi.trips$trip_time_in_secs)
+```
+
+Top 10 Drivers Analysis:
+```{r}
+summary(taxi.trips.original$fare_amount)
+hist(taxi.trips.original$fare_amount)
+summary(taxi.trips$fare_amount) #note: NAs are values that were considered outliers by the previous function.
+hist(taxi.trips$fare_amount)
+summary(taxi.trips$pickup_latitude)
+hist(taxi.trips$pickup_latitude, breaks = 100)
+summary(taxi.trips$pickup_longitude)
+hist(taxi.trips$pickup_longitude, breaks = 100)
+summary(taxi.trips$dropoff_latitude)
+hist(taxi.trips$dropoff_latitude, breaks = 100)
+summary(taxi.trips$dropoff_longitude)
+hist(taxi.trips$dropoff_longitude, breaks = 100)
+```
+
+Bottom 10 Drivers Analysis:
+There are only 10 trips in this data to analyze, each from a different driver. 
+
+```{r}
+taxi.trips = read.csv('smallest.csv')
+taxi.trips.original = taxi.trips
+taxi.trips = fix_coordinates(taxi.trips)
+taxi.trips$fare_amount = remove_outliers(taxi.trips$fare_amount)
+taxi.trips$trip_time_in_secs = remove_outliers(taxi.trips$trip_time_in_secs)
+summary(taxi.trips.original$fare_amount)
+hist(taxi.trips.original$fare_amount)
+summary(taxi.trips$fare_amount)
+hist(taxi.trips$fare_amount)
+summary(taxi.trips$pickup_latitude)
+hist(taxi.trips$pickup_latitude)
+summary(taxi.trips$pickup_longitude)
+hist(taxi.trips$pickup_longitude)
+summary(taxi.trips$dropoff_latitude)
+hist(taxi.trips$dropoff_latitude)
+summary(taxi.trips$dropoff_longitude)
+hist(taxi.trips$dropoff_longitude)
+```
+
+Interday linkage Analysis: This will synthesize daily totals for earnings and time spent and attempt to plot the data in order to determine if a pattern emerges. 
+```{r}
+days_earnings = function(driver) {
+  days_worked = find_dates(driver)
+  per_diem = c()
+  for (day in days_worked) {
+    daily = sum(driver[which(grepl(day, driver$pickup_datetime)),]$total_amount)
+    per_diem = c(per_diem, daily)
+  }
+  return (per_diem)
+}
+test = data[which(data$hack_license == '03173DD93C1171DA1788E6E7D733C5A9'),]
+days_earnings(test)
+
+hours_worked = function(driver) { #note: multiple ways to calculate this. I'm going to use total time spent driving a passenger. 
+  days_worked = find_dates(driver)
+  per_diem = c()
+  for (day in days_worked) {
+    daily = sum(driver[which(grepl(day, driver$pickup_datetime)),]$trip_time_in_secs)
+    per_diem = c(per_diem, daily)
+  }
+  return (per_diem)
+}
+hours_worked(test)
+
+inter_day_analysis = function(data, fun_x, fun_y) {
+  drivers = levels(data$hack_license)
+  for (name in drivers) {
+    driver = data[which(data$hack_license == name),] 
+    x = remove_outliers(fun_x(driver))
+    temp = remove_outliers(fun_y(driver))
+    y = c(temp[2:length(temp)], NA)
+    plot(x,y, main = paste("Hack License:", name), xlab = as.character(substitute(fun_x)), ylab = paste("Tomorrow's ", as.character(substitute(fun_y))))
+  }
+}
+inter_day_analysis(data, hours_worked, days_earnings)
+inter_day_analysis(data, hours_worked, hours_worked)
+inter_day_analysis(data, days_earnings, hours_worked)
+inter_day_analysis(data, days_earnings, days_earnings)
+```
