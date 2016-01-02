@@ -1,0 +1,11 @@
+trip_fares = read.csv("trip_fare.csv")
+print("trip_fares read")
+trip_data = read.csv("trip_data.csv")
+print("trip_data read")
+licenses = unique(trip_data$'hack_licenses')
+for (name in licenses) {
+  trip_fares_names = trip_fares[which(trip_fares$'hack_licenses' == name),]
+  trip_data_names = trip_data[which(trip_data$'hack_licenses' == name),]
+  full = merge(trip_fares_names, trip_data_names, by.x = c("medallion", "hack_license", "pickup_datetime"), by.y = c("medallion", "hack_license", "pickup_datetime"))
+  write.csv(full, file = paste(name, ".csv"))
+}
